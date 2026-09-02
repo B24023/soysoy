@@ -24,7 +24,10 @@ def get_gspread_client():
     return gspread.authorize(creds)
 
 def sync_sheet_to_local():
-    """スプレッドシートからデータを読み込み、ローカルのCSVとして保存する"""
+    """スプレッドシートから読み込む。失敗した場合はGitHub側のCSVをフォールバックとして使う"""
+    os.makedirs("data", exist_ok=True)
+    csv_path = "data/users.csv"
+    
     try:
         client = get_gspread_client()
         sheet = client.open_by_key(st.secrets["SPREADSHEET_KEY"]).sheet1
@@ -32,21 +35,21 @@ def sync_sheet_to_local():
         
         if data:
             df = pd.DataFrame(data)
-        else:
-            # スプレッドシートが空の場合のデフォルトデータ
-            df = pd.DataFrame([
-                {"id": 0, "name": "施設（デポ）", "lat": 34.8151, "lng": 135.6525, "address": "枚方市...", "care_level": "施設", "wheelchair": "なし", "days": "月,火,水,木,金,土,日"}
-            ])
-            # 初期データをスプレッドシートにも書き込む
-            sheet.clear()
-            sheet.update([df.columns.values.tolist()] + df.values.tolist())
-            
-        os.makedirs("data", exist_ok=True)
-        df.to_csv("data/users.csv", index=False)
-        return df
+            df.to_csv(csv_path, index=False)
+            return df
     except Exception as e:
-        st.error(f"スプレッドシートの読み込みに失敗しました: {e}")
-        return pd.DataFrame(columns=["id", "name", "lat", "lng", "address", "care_level", "wheelchair", "days"])
+        st.warning(f"スプレッドシートからの読み込みに失敗しました（ローカルCSVを使用します）: {e}")
+        
+    # スプレッドシートが空または失敗した場合はGitHub上のCSVを読む
+    if os.path.exists(csv_path):
+        return pd.read_csv(csv_path)
+    else:
+        # デフォルトの最小構成
+        df = pd.DataFrame([
+            {"id": 0, "name": "施設（デポ）", "lat": 34.8151, "lng": 135.6525, "address": "枚方市...", "care_level": "施設", "wheelchair": "なし", "days": "月,火,水,木,金,土,日"}
+        ])
+        df.to_csv(csv_path, index=False)
+        return df
 
 def sync_local_to_sheet():
     """ローカルのCSVの内容をスプレッドシートに上書き保存する"""
@@ -355,7 +358,6 @@ with tab_result:
                     route_coords, dist, roads = get_route_geometry_and_steps(waypoints)
                     
                     if route_coords:
-                        # ルート上に流れるアニメーション（AntPath）を適用
                         AntPath(
                             locations=route_coords,
                             color=color,
@@ -382,4 +384,4 @@ with tab_result:
             st.download_button("現場用配車表を出力 (CSV)", data=csv_data, file_name=f"配車表_{datetime.date.today()}.csv", mime="text/csv", type="primary")
             
         except Exception as e:
-                        st.error(f"結果の読み込みエラー: {e}")
+            st.error(f"結果の読み込みエラー: {e}")
