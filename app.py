@@ -12,7 +12,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from optimizer import run_optimization
 from streamlit_sortables import sort_items
 
-st.set_page_config(page_title="老人ホーム送迎ルート最適化", layout="wide")
+st.set_page_config(page_title="老人ホーム送迎ルート最適化システム", layout="wide")
 
 # ──────────────────────────────────────────
 # スプレッドシート連携機能
@@ -132,13 +132,14 @@ def update_route_data_from_csv(num_vehicles):
 # ──────────────────────────────────────────
 # UIの構築
 # ──────────────────────────────────────────
-st.title("老人ホーム送迎ルート最適化")
-st.markdown("日々の送迎計画の作成と、利用者・車両データの管理を行う。")
+st.title("老人ホーム送迎ルート最適化システム")
+st.markdown("日々の送迎計画の作成と、利用者・車両データの管理を行います。")
 
 tab_plan, tab_users, tab_vehicles, tab_road, tab_result = st.tabs([
     "ダッシュボード＆計画作成", 
     "利用者管理", 
     "車両管理", 
+    "通行止め管理", 
     "最適化結果"
 ])
 
@@ -233,6 +234,33 @@ with tab_vehicles:
     st.header("車両一覧")
     st.dataframe(st.session_state.vehicles_df, hide_index=True, use_container_width=True)
 
+# ＝＝＝ タブ4: 通行止め管理 ＝＝＝
+with tab_road:
+    st.header("通れない道（工事・通行止め）登録")
+    st.markdown("※ 地図をクリックして緯度経度を取得できます。")
+    
+    m_road = folium.Map(location=[34.8151, 135.6525], zoom_start=13)
+    st_data = st_folium(m_road, height=300, width=800)
+    
+    with st.form("add_road_form"):
+        clicked_lat = st_data["last_clicked"]["lat"] if st_data and st_data.get("last_clicked") else ""
+        clicked_lng = st_data["last_clicked"]["lng"] if st_data and st_data.get("last_clicked") else ""
+        
+        st.write(f"選択した座標: {clicked_lat}, {clicked_lng}")
+        r_name = st.text_input("道路名・区間 *", placeholder="例：国道1号線 枚方バイパス")
+        r_memo = st.text_input("メモ", placeholder="例：終日車線規制")
+        
+        if st.form_submit_button("区間を登録する", type="primary"):
+            if r_name and clicked_lat:
+                new_id = len(st.session_state.impassable_df) + 1
+                new_road = {"id": new_id, "road_name": r_name, "memo": r_memo, "lat": clicked_lat, "lng": clicked_lng}
+                st.session_state.impassable_df = pd.concat([st.session_state.impassable_df, pd.DataFrame([new_road])], ignore_index=True)
+                st.success("登録しました。")
+            else:
+                st.error("エラー: 地図をクリックして座標を指定し、道路名を入力してください。")
+                
+    st.subheader("通れない道 一覧")
+    st.dataframe(st.session_state.impassable_df, hide_index=True)
 
 # ＝＝＝ タブ5: 最適化結果 ＝＝＝
 with tab_result:
