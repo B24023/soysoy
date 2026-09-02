@@ -1,0 +1,10 @@
+streamlit
+pandas
+folium
+streamlit-folium
+requests
+gspread
+oauth2client
+streamlit-sortables
+ortools
+protobuf
