@@ -40,11 +40,9 @@ def sync_sheet_to_local():
     except Exception as e:
         st.warning(f"スプレッドシートからの読み込みに失敗しました（ローカルCSVを使用します）: {e}")
         
-    # スプレッドシートが空または失敗した場合はGitHub上のCSVを読む
     if os.path.exists(csv_path):
         return pd.read_csv(csv_path)
     else:
-        # デフォルトの最小構成
         df = pd.DataFrame([
             {"id": 0, "name": "施設（デポ）", "lat": 34.8151, "lng": 135.6525, "address": "枚方市...", "care_level": "施設", "wheelchair": "なし", "days": "月,火,水,木,金,土,日"}
         ])
@@ -78,9 +76,6 @@ if "vehicles_df" not in st.session_state:
         "wheelchair_support": ["あり", "なし"],
         "driver": ["佐藤", "鈴木"]
     })
-
-if "impassable_df" not in st.session_state:
-    st.session_state.impassable_df = pd.DataFrame(columns=["id", "road_name", "memo", "lat", "lng"])
 
 if "optimization_done" not in st.session_state:
     st.session_state.optimization_done = False
@@ -135,11 +130,11 @@ def update_route_data_from_csv(num_vehicles):
 st.title("老人ホーム送迎ルート最適化システム")
 st.markdown("日々の送迎計画の作成と、利用者・車両データの管理を行います。")
 
-tab_plan, tab_users, tab_vehicles, tab_road, tab_result = st.tabs([
+# タブから「通行止め管理」を削除
+tab_plan, tab_users, tab_vehicles, tab_result = st.tabs([
     "ダッシュボード＆計画作成", 
     "利用者管理", 
     "車両管理", 
-    "通行止め管理", 
     "最適化結果"
 ])
 
@@ -167,7 +162,7 @@ with tab_plan:
         disabled=["id", "name", "care_level", "address", "days"]
     )
     
-    with st.expander("詳細設定（車両数・時間制限・通行止め）"):
+    with st.expander("詳細設定（車両数・時間制限）"):
         col1, col2, col3 = st.columns(3)
         with col1:
             n_vehicles = st.number_input("利用車両数", min_value=1, max_value=5, value=2)
@@ -175,13 +170,6 @@ with tab_plan:
             arrival_time = st.time_input("施設到着時刻", datetime.time(9, 0))
         with col3:
             max_ride_time = st.number_input("最大乗車時間（分）", value=60)
-            
-        st.write("**本日の「通れない道」適用**")
-        if not st.session_state.impassable_df.empty:
-            for _, road in st.session_state.impassable_df.iterrows():
-                st.checkbox(f"{road['road_name']} ({road['memo']})", value=True)
-        else:
-            st.caption("登録されている通れない道はありません。")
 
     if st.button("AIで最適ルートを自動作成する", type="primary", use_container_width=True):
         selected_ids = edited_plan_df[edited_plan_df["出席"]]["id"].tolist()
@@ -234,35 +222,7 @@ with tab_vehicles:
     st.header("車両一覧")
     st.dataframe(st.session_state.vehicles_df, hide_index=True, use_container_width=True)
 
-# ＝＝＝ タブ4: 通行止め管理 ＝＝＝
-with tab_road:
-    st.header("通れない道（工事・通行止め）登録")
-    st.markdown("※ 地図をクリックして緯度経度を取得できます。")
-    
-    m_road = folium.Map(location=[34.8151, 135.6525], zoom_start=13)
-    st_data = st_folium(m_road, height=300, width=800)
-    
-    with st.form("add_road_form"):
-        clicked_lat = st_data["last_clicked"]["lat"] if st_data and st_data.get("last_clicked") else ""
-        clicked_lng = st_data["last_clicked"]["lng"] if st_data and st_data.get("last_clicked") else ""
-        
-        st.write(f"選択した座標: {clicked_lat}, {clicked_lng}")
-        r_name = st.text_input("道路名・区間 *", placeholder="例：国道1号線 枚方バイパス")
-        r_memo = st.text_input("メモ", placeholder="例：終日車線規制")
-        
-        if st.form_submit_button("区間を登録する", type="primary"):
-            if r_name and clicked_lat:
-                new_id = len(st.session_state.impassable_df) + 1
-                new_road = {"id": new_id, "road_name": r_name, "memo": r_memo, "lat": clicked_lat, "lng": clicked_lng}
-                st.session_state.impassable_df = pd.concat([st.session_state.impassable_df, pd.DataFrame([new_road])], ignore_index=True)
-                st.success("登録しました。")
-            else:
-                st.error("エラー: 地図をクリックして座標を指定し、道路名を入力してください。")
-                
-    st.subheader("通れない道 一覧")
-    st.dataframe(st.session_state.impassable_df, hide_index=True)
-
-# ＝＝＝ タブ5: 最適化結果 ＝＝＝
+# ＝＝＝ タブ4: 最適化結果 ＝＝＝
 with tab_result:
     if not st.session_state.optimization_done:
         st.markdown("※ 「計画作成」タブから最適化を実行すると、ここに結果が表示されます。")
