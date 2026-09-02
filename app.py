@@ -12,7 +12,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from optimizer import run_optimization
 from streamlit_sortables import sort_items
 
-st.set_page_config(page_title="老人ホーム送迎ルート最適化システム", layout="wide")
+st.set_page_config(page_title="老人ホーム送迎ルート最適化", layout="wide")
 
 # ──────────────────────────────────────────
 # スプレッドシート連携機能
