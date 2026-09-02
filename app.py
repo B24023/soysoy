@@ -1,26 +1,71 @@
 import streamlit as st
 import pandas as pd
 import folium
+from folium.plugins import AntPath
 from streamlit_folium import st_folium
 import requests
 import datetime
+import json
+import os
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 from optimizer import run_optimization
 from streamlit_sortables import sort_items
 
 st.set_page_config(page_title="老人ホーム送迎ルート最適化システム", layout="wide")
 
 # ──────────────────────────────────────────
+# スプレッドシート連携機能
+# ──────────────────────────────────────────
+def get_gspread_client():
+    creds_dict = json.loads(st.secrets["GCP_SERVICE_ACCOUNT"])
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    return gspread.authorize(creds)
+
+def sync_sheet_to_local():
+    """スプレッドシートからデータを読み込み、ローカルのCSVとして保存する"""
+    try:
+        client = get_gspread_client()
+        sheet = client.open_by_key(st.secrets["SPREADSHEET_KEY"]).sheet1
+        data = sheet.get_all_records()
+        
+        if data:
+            df = pd.DataFrame(data)
+        else:
+            # スプレッドシートが空の場合のデフォルトデータ
+            df = pd.DataFrame([
+                {"id": 0, "name": "施設（デポ）", "lat": 34.8151, "lng": 135.6525, "address": "枚方市...", "care_level": "施設", "wheelchair": "なし", "days": "月,火,水,木,金,土,日"}
+            ])
+            # 初期データをスプレッドシートにも書き込む
+            sheet.clear()
+            sheet.update([df.columns.values.tolist()] + df.values.tolist())
+            
+        os.makedirs("data", exist_ok=True)
+        df.to_csv("data/users.csv", index=False)
+        return df
+    except Exception as e:
+        st.error(f"スプレッドシートの読み込みに失敗しました: {e}")
+        return pd.DataFrame(columns=["id", "name", "lat", "lng", "address", "care_level", "wheelchair", "days"])
+
+def sync_local_to_sheet():
+    """ローカルのCSVの内容をスプレッドシートに上書き保存する"""
+    try:
+        df = pd.read_csv("data/users.csv")
+        df = df.fillna("")
+        
+        client = get_gspread_client()
+        sheet = client.open_by_key(st.secrets["SPREADSHEET_KEY"]).sheet1
+        sheet.clear()
+        sheet.update([df.columns.values.tolist()] + df.values.tolist())
+    except Exception as e:
+        st.error(f"スプレッドシートへの書き込みに失敗しました: {e}")
+
+# ──────────────────────────────────────────
 # セッションステートの初期化
 # ──────────────────────────────────────────
 if "users_df" not in st.session_state:
-    try:
-        df = pd.read_csv("data/users.csv")
-        if "care_level" not in df.columns: df["care_level"] = "要介護1"
-        if "wheelchair" not in df.columns: df["wheelchair"] = "なし"
-        if "days" not in df.columns: df["days"] = "月,火,水,木,金"
-        st.session_state.users_df = df
-    except:
-        st.session_state.users_df = pd.DataFrame(columns=["id", "name", "lat", "lng", "address", "care_level", "wheelchair", "days"])
+    st.session_state.users_df = sync_sheet_to_local()
 
 if "vehicles_df" not in st.session_state:
     st.session_state.vehicles_df = pd.DataFrame({
@@ -40,9 +85,6 @@ if "optimization_done" not in st.session_state:
 if "route_data" not in st.session_state:
     st.session_state.route_data = []
 
-# ──────────────────────────────────────────
-# ユーティリティ関数
-# ──────────────────────────────────────────
 def get_route_geometry_and_steps(waypoints):
     coords = ";".join([f"{p['lng']},{p['lat']}" for p in waypoints])
     url = f"http://router.project-osrm.org/route/v1/driving/{coords}?overview=full&geometries=geojson&steps=true"
@@ -87,10 +129,9 @@ def update_route_data_from_csv(num_vehicles):
 # ──────────────────────────────────────────
 # UIの構築
 # ──────────────────────────────────────────
-st.title("送迎ルート最適化システム")
+st.title("老人ホーム送迎ルート最適化システム")
 st.markdown("日々の送迎計画の作成と、利用者・車両データの管理を行います。")
 
-# 本来のタブUIを使用
 tab_plan, tab_users, tab_vehicles, tab_road, tab_result = st.tabs([
     "ダッシュボード＆計画作成", 
     "利用者管理", 
@@ -169,10 +210,14 @@ with tab_users:
         
         if st.form_submit_button("登録する", type="primary"):
             if u_name and u_address:
-                new_id = st.session_state.users_df["id"].max() + 1 if not st.session_state.users_df.empty else 1
+                new_id = int(st.session_state.users_df["id"].max()) + 1 if not st.session_state.users_df.empty else 1
                 new_row = {"id": new_id, "name": u_name, "lat": 34.815, "lng": 135.652, "address": u_address, "care_level": u_care, "wheelchair": u_wheel, "days": ",".join(u_days)}
                 st.session_state.users_df = pd.concat([st.session_state.users_df, pd.DataFrame([new_row])], ignore_index=True)
+                
+                os.makedirs("data", exist_ok=True)
                 st.session_state.users_df.to_csv("data/users.csv", index=False)
+                sync_local_to_sheet()
+                
                 st.success(f"{u_name} さんを登録しました。")
             else:
                 st.error("エラー: 必須項目を入力してください。")
@@ -310,7 +355,15 @@ with tab_result:
                     route_coords, dist, roads = get_route_geometry_and_steps(waypoints)
                     
                     if route_coords:
-                        folium.PolyLine(route_coords, color=color, weight=5, opacity=0.8).add_to(m_res)
+                        # ルート上に流れるアニメーション（AntPath）を適用
+                        AntPath(
+                            locations=route_coords,
+                            color=color,
+                            weight=5,
+                            opacity=0.8,
+                            delay=800,
+                            dash_array=[10, 20]
+                        ).add_to(m_res)
                         
                     st.write(f"総移動距離: {dist/1000:.1f} km")
                     
@@ -329,4 +382,4 @@ with tab_result:
             st.download_button("現場用配車表を出力 (CSV)", data=csv_data, file_name=f"配車表_{datetime.date.today()}.csv", mime="text/csv", type="primary")
             
         except Exception as e:
-            st.error(f"結果の読み込みエラー: {e}")
+                        st.error(f"結果の読み込みエラー: {e}")
