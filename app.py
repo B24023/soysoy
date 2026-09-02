@@ -132,8 +132,8 @@ def update_route_data_from_csv(num_vehicles):
 # ──────────────────────────────────────────
 # UIの構築
 # ──────────────────────────────────────────
-st.title("老人ホーム送迎ルート最適化システム")
-st.markdown("日々の送迎計画の作成と、利用者・車両データの管理を行います。")
+st.title("老人ホーム送迎ルート最適化")
+st.markdown("日々の送迎計画の作成と、利用者・車両データの管理を行う。")
 
 tab_plan, tab_users, tab_vehicles, tab_road, tab_result = st.tabs([
     "ダッシュボード＆計画作成", 
