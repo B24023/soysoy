@@ -139,7 +139,6 @@ tab_plan, tab_users, tab_vehicles, tab_road, tab_result = st.tabs([
     "ダッシュボード＆計画作成", 
     "利用者管理", 
     "車両管理", 
-    "通行止め管理", 
     "最適化結果"
 ])
 
