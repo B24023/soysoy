@@ -51,7 +51,7 @@ def run_optimization(selected_ids: list[int], n_vehicles: int = 1) -> list[dict]
             "data/result.csv", index=False
         )
         return []
-
+ 
     # ノード一覧: index 0 = デポ、index 1..n = 利用者
     nodes = [{"id": int(depot["id"]), "lat": float(depot["lat"]),
                "lng": float(depot["lng"]), "name": str(depot["name"])}]
