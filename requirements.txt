@@ -1,10 +1,4 @@
 streamlit
-pandas
-folium
+st-gsheets-connection
 streamlit-folium
-requests
-gspread
-oauth2client
 streamlit-sortables
-ortools
-protobuf
