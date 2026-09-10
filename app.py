@@ -213,8 +213,47 @@ with tab_users:
 
 # ＝＝＝ タブ3: 車両管理 ＝＝＝
 with tab_vehicles:
-    st.header("車両情報の編集")
-    st.markdown("ここで編集した内容は直接スプレッドシートに保存されます。")
+    st.header("新規車両登録")
+    
+    # わかりやすい入力フォームを追加
+    with st.form("add_vehicle_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            v_name = st.text_input("車両名 *", placeholder="例：3号車（シエンタ）")
+            v_driver = st.text_input("担当ドライバー", placeholder="例：田中")
+        with c2:
+            v_capacity = st.number_input("定員（乗車可能人数）", min_value=1, max_value=20, value=5)
+            v_wheel = st.selectbox("車椅子対応", ["あり", "なし"])
+            
+        if st.form_submit_button("車両を登録する", type="primary"):
+            if v_name:
+                # 新しいIDを自動で割り当て
+                new_id = st.session_state.vehicles_df["id"].max() + 1 if not st.session_state.vehicles_df.empty else 1
+                new_row = pd.DataFrame([{
+                    "id": new_id, 
+                    "name": v_name, 
+                    "capacity": v_capacity, 
+                    "wheelchair_support": v_wheel, 
+                    "driver": v_driver
+                }])
+                
+                # データを追加
+                st.session_state.vehicles_df = pd.concat([st.session_state.vehicles_df, new_row], ignore_index=True)
+                
+                # スプレッドシートへ書き込み
+                try:
+                    conn.update(worksheet="vehicles", data=st.session_state.vehicles_df)
+                    st.success(f"「{v_name}」を登録し、スプレッドシート（vehicles）を更新しました。")
+                except Exception as e:
+                    st.error(f"スプレッドシートの更新に失敗しました: {e}")
+            else:
+                st.error("エラー: 車両名を入力してください。")
+
+    st.divider()
+    
+    # 既存データの編集エリア
+    st.subheader("登録済み車両の編集・一覧 (スプレッドシート: vehicles)")
+    st.markdown("※ 表のセルを直接クリックして名前や定員を変更したり、行を削除したりできます。変更後は下の「編集内容を保存する」ボタンを押してください。")
     
     edited_vehicles_df = st.data_editor(
         st.session_state.vehicles_df, 
@@ -223,11 +262,11 @@ with tab_vehicles:
         use_container_width=True
     )
     
-    if st.button("車両データを保存する", type="primary"):
+    if st.button("編集内容を保存する"):
         st.session_state.vehicles_df = edited_vehicles_df
         try:
             conn.update(worksheet="vehicles", data=st.session_state.vehicles_df)
-            st.success("スプレッドシート（vehicles）を更新しました。")
+            st.success("変更内容をスプレッドシート（vehicles）に保存しました。")
         except Exception as e:
             st.error(f"更新エラー: {e}")
 
