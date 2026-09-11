@@ -15,28 +15,35 @@ st.set_page_config(page_title="老人ホーム送迎ルート最適化システ�
 # ──────────────────────────────────────────
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+# ==========================================
+# 3つのスプレッドシートのURLをここで指定する
+# ==========================================
+URL_USERS = "利用者のスプレッドシートのURL"
+URL_VEHICLES = "車両のスプレッドシートのURL"
+URL_IMPASSABLE = "通行止めのスプレッドシートのURL"
+
 # ──────────────────────────────────────────
 # セッションステートの初期化（全データをスプレッドシートから取得）
 # ──────────────────────────────────────────
 # 1. 利用者データ
 if "users_df" not in st.session_state:
     try:
-        df = conn.read(worksheet="users").dropna(how="all")
+        df = conn.read(spreadsheet=URL_USERS, worksheet="シート1").dropna(how="all")
         if "care_level" not in df.columns: df["care_level"] = "要介護1"
         if "wheelchair" not in df.columns: df["wheelchair"] = "なし"
         if "days" not in df.columns: df["days"] = "月,火,水,木,金"
         st.session_state.users_df = df
     except Exception as e:
-        st.warning("usersシートの読み込みに失敗しました。空のデータで開始します。")
+        st.warning(f"usersシートの読み込みに失敗しました。空のデータで開始します。詳細: {e}")
         st.session_state.users_df = pd.DataFrame(columns=["id", "name", "lat", "lng", "address", "care_level", "wheelchair", "days"])
 
 # 2. 車両データ
 if "vehicles_df" not in st.session_state:
     try:
-        df_v = conn.read(worksheet="vehicles").dropna(how="all")
+        df_v = conn.read(spreadsheet=URL_VEHICLES, worksheet="シート1").dropna(how="all")
         st.session_state.vehicles_df = df_v
     except Exception as e:
-        st.warning("vehiclesシートの読み込みに失敗しました。初期設定を使用します。")
+        st.warning(f"vehiclesシートの読み込みに失敗しました。初期設定を使用します。詳細: {e}")
         st.session_state.vehicles_df = pd.DataFrame({
             "id": [1, 2],
             "name": ["1号車（ハイエース）", "2号車（ノア）"],
@@ -48,10 +55,10 @@ if "vehicles_df" not in st.session_state:
 # 3. 通行止めデータ
 if "impassable_df" not in st.session_state:
     try:
-        df_i = conn.read(worksheet="impassable").dropna(how="all")
+        df_i = conn.read(spreadsheet=URL_IMPASSABLE, worksheet="シート1").dropna(how="all")
         st.session_state.impassable_df = df_i
     except Exception as e:
-        st.warning("impassableシートの読み込みに失敗しました。空のデータで開始します。")
+        st.warning(f"impassableシートの読み込みに失敗しました。空のデータで開始します。詳細: {e}")
         st.session_state.impassable_df = pd.DataFrame(columns=["id", "road_name", "memo", "lat", "lng"])
 
 if "optimization_done" not in st.session_state:
@@ -88,7 +95,11 @@ def get_route_geometry_and_steps(waypoints):
 def update_route_data(optimized_rows, num_vehicles):
     try:
         result_df = pd.DataFrame(optimized_rows)
-        merged = result_df.merge(st.session_state.users_df, left_on="user_id", right_on="id", how="left")
+        # IDマッチングを確実にするため、一旦floatに揃える
+        st.session_state.users_df["id_float"] = st.session_state.users_df["id"].astype(float)
+        result_df["user_id_float"] = result_df["user_id"].astype(float)
+        
+        merged = result_df.merge(st.session_state.users_df, left_on="user_id_float", right_on="id_float", how="left")
         
         route_data = []
         for vid in range(num_vehicles):
@@ -96,7 +107,9 @@ def update_route_data(optimized_rows, num_vehicles):
             v_name = f"車両 {vid + 1}"
             items = []
             for _, r in v_rows.iterrows():
-                items.append(f"ID{r['id']}: {r['name']} ({r['care_level']})")
+                # idを確実に整数（int）に変換してから文字列にする
+                uid = int(float(r['id']))
+                items.append(f"ID{uid}: {r['name']} ({r['care_level']})")
             route_data.append({"header": v_name, "items": items})
             
         route_data.append({"header": "未割り当て（手動で移動）", "items": []})
@@ -128,7 +141,8 @@ with tab_plan:
     
     df = st.session_state.users_df
     # ID0はデポ（施設）想定
-    display_df = df[df["id"] != 0].copy() if not df.empty else df.copy()
+    # float変換してから比較することで、文字列の'0.0'などにも対応
+    display_df = df[df["id"].astype(float) != 0.0].copy() if not df.empty else df.copy()
     if selected_day != "すべて" and not display_df.empty:
         display_df = display_df[display_df["days"].astype(str).str.contains(selected_day, na=False)]
     
@@ -165,7 +179,8 @@ with tab_plan:
         if edited_plan_df.empty or not edited_plan_df["出席"].any():
             st.error("エラー: 出席予定の利用者がいません。")
         else:
-            selected_ids = edited_plan_df[edited_plan_df["出席"]]["id"].tolist()
+            # float経由で確実にintにして渡す
+            selected_ids = [int(float(x)) for x in edited_plan_df[edited_plan_df["出席"]]["id"].tolist()]
             with st.spinner("AIが最適ルートを計算中..."):
                 try:
                     optimized_rows = run_optimization(st.session_state.users_df, selected_ids, int(n_vehicles))
@@ -191,7 +206,10 @@ with tab_users:
         
         if st.form_submit_button("登録する", type="primary"):
             if u_name and u_address:
-                new_id = st.session_state.users_df["id"].max() + 1 if not st.session_state.users_df.empty else 1
+                # 最大ID取得もfloat経由で安全に
+                max_id = int(st.session_state.users_df["id"].astype(float).max()) if not st.session_state.users_df.empty else 0
+                new_id = max_id + 1
+                
                 new_row = pd.DataFrame([{
                     "id": new_id, "name": u_name, "lat": 34.815, "lng": 135.652, 
                     "address": u_address, "care_level": u_care, "wheelchair": u_wheel, 
@@ -200,7 +218,7 @@ with tab_users:
                 st.session_state.users_df = pd.concat([st.session_state.users_df, new_row], ignore_index=True)
                 
                 try:
-                    conn.update(worksheet="users", data=st.session_state.users_df)
+                    conn.update(spreadsheet=URL_USERS, worksheet="シート1", data=st.session_state.users_df)
                     st.success(f"{u_name} さんを登録し、スプレッドシート（users）を更新しました。")
                 except Exception as e:
                     st.error(f"スプレッドシートの更新に失敗しました: {e}")
@@ -214,8 +232,6 @@ with tab_users:
 # ＝＝＝ タブ3: 車両管理 ＝＝＝
 with tab_vehicles:
     st.header("新規車両登録")
-    
-    # わかりやすい入力フォームを追加
     with st.form("add_vehicle_form"):
         c1, c2 = st.columns(2)
         with c1:
@@ -227,8 +243,8 @@ with tab_vehicles:
             
         if st.form_submit_button("車両を登録する", type="primary"):
             if v_name:
-                # 新しいIDを自動で割り当て
-                new_id = st.session_state.vehicles_df["id"].max() + 1 if not st.session_state.vehicles_df.empty else 1
+                max_v_id = int(st.session_state.vehicles_df["id"].astype(float).max()) if not st.session_state.vehicles_df.empty else 0
+                new_id = max_v_id + 1
                 new_row = pd.DataFrame([{
                     "id": new_id, 
                     "name": v_name, 
@@ -237,12 +253,9 @@ with tab_vehicles:
                     "driver": v_driver
                 }])
                 
-                # データを追加
                 st.session_state.vehicles_df = pd.concat([st.session_state.vehicles_df, new_row], ignore_index=True)
-                
-                # スプレッドシートへ書き込み
                 try:
-                    conn.update(worksheet="vehicles", data=st.session_state.vehicles_df)
+                    conn.update(spreadsheet=URL_VEHICLES, worksheet="シート1", data=st.session_state.vehicles_df)
                     st.success(f"「{v_name}」を登録し、スプレッドシート（vehicles）を更新しました。")
                 except Exception as e:
                     st.error(f"スプレッドシートの更新に失敗しました: {e}")
@@ -250,8 +263,6 @@ with tab_vehicles:
                 st.error("エラー: 車両名を入力してください。")
 
     st.divider()
-    
-    # 既存データの編集エリア
     st.subheader("登録済み車両の編集・一覧 (スプレッドシート: vehicles)")
     st.markdown("※ 表のセルを直接クリックして名前や定員を変更したり、行を削除したりできます。変更後は下の「編集内容を保存する」ボタンを押してください。")
     
@@ -262,10 +273,10 @@ with tab_vehicles:
         use_container_width=True
     )
     
-    if st.button("編集内容を保存する"):
+    if st.button("編集内容を保存する", key="save_vehicles"):
         st.session_state.vehicles_df = edited_vehicles_df
         try:
-            conn.update(worksheet="vehicles", data=st.session_state.vehicles_df)
+            conn.update(spreadsheet=URL_VEHICLES, worksheet="シート1", data=st.session_state.vehicles_df)
             st.success("変更内容をスプレッドシート（vehicles）に保存しました。")
         except Exception as e:
             st.error(f"更新エラー: {e}")
@@ -296,7 +307,7 @@ with tab_road:
                 st.session_state.impassable_df = pd.concat([st.session_state.impassable_df, new_road], ignore_index=True)
                 
                 try:
-                    conn.update(worksheet="impassable", data=st.session_state.impassable_df)
+                    conn.update(spreadsheet=URL_IMPASSABLE, worksheet="シート1", data=st.session_state.impassable_df)
                     st.success("登録し、スプレッドシート（impassable）を更新しました。")
                 except Exception as e:
                     st.error(f"スプレッドシートの更新に失敗しました: {e}")
@@ -305,17 +316,16 @@ with tab_road:
                 
     st.subheader("通れない道 一覧 (スプレッドシート: impassable)")
     
-    # 既存の通行止めデータも編集・削除可能に
     edited_impassable_df = st.data_editor(
         st.session_state.impassable_df,
         num_rows="dynamic",
         hide_index=True,
         use_container_width=True
     )
-    if st.button("通行止めデータを上書き保存する"):
+    if st.button("通行止めデータを上書き保存する", key="save_roads"):
         st.session_state.impassable_df = edited_impassable_df
         try:
-            conn.update(worksheet="impassable", data=st.session_state.impassable_df)
+            conn.update(spreadsheet=URL_IMPASSABLE, worksheet="シート1", data=st.session_state.impassable_df)
             st.success("スプレッドシート（impassable）を更新しました。")
         except Exception as e:
             st.error(f"更新エラー: {e}")
@@ -338,15 +348,16 @@ with tab_result:
 
         try:
             users_df = st.session_state.users_df
-            # デポ情報が存在しない場合のエラー回避
-            if 0 in users_df["id"].values:
-                depot_row = users_df[users_df["id"] == 0].iloc[0]
+            
+            # デポ情報が存在しない場合のエラー回避（float比較対応）
+            if 0.0 in users_df["id"].astype(float).values:
+                depot_row = users_df[users_df["id"].astype(float) == 0.0].iloc[0]
             else:
                 depot_row = {"lat": 34.8151, "lng": 135.6525} # デフォルト座標
             
-            m_res = folium.Map(location=[depot_row["lat"], depot_row["lng"]], zoom_start=13)
+            m_res = folium.Map(location=[float(depot_row["lat"]), float(depot_row["lng"])], zoom_start=13)
             folium.CircleMarker(
-                location=[depot_row["lat"], depot_row["lng"]],
+                location=[float(depot_row["lat"]), float(depot_row["lng"])],
                 radius=10,
                 color="red",
                 fill=True,
@@ -368,14 +379,19 @@ with tab_result:
                 
                 points = []
                 for i, item in enumerate(route["items"]):
-                    uid = int(item.split(":")[0].replace("ID", ""))
-                    user_row = users_df[users_df["id"] == uid].iloc[0]
+                    # '1.0' のような文字列でも安全に整数に変換する
+                    uid_str = item.split(":")[0].replace("ID", "")
+                    uid = int(float(uid_str))
+                    
+                    # DataFrameのid列も一旦floatに揃えてから比較し、行を取得する
+                    user_row = users_df[users_df["id"].astype(float) == float(uid)].iloc[0]
+                    
                     points.append({
                         "order": i + 1,
                         "id": uid,
                         "name": user_row["name"],
-                        "lat": user_row["lat"],
-                        "lng": user_row["lng"],
+                        "lat": float(user_row["lat"]), # 念のため緯度経度もfloatに変換
+                        "lng": float(user_row["lng"]),
                         "address": user_row["address"],
                         "care_level": user_row["care_level"]
                     })
@@ -394,11 +410,12 @@ with tab_result:
             
             for i, v in enumerate(vehicles):
                 color = v_colors[i % len(v_colors)]
-                v_info = st.session_state.vehicles_df[st.session_state.vehicles_df["id"] == v["vehicle_id"]]
+                # 車両IDマッチングのfloat対応
+                v_info = st.session_state.vehicles_df[st.session_state.vehicles_df["id"].astype(float) == float(v["vehicle_id"])]
                 v_name = v_info["name"].values[0] if not v_info.empty else f"車両 {v['vehicle_id']}"
                 driver = v_info["driver"].values[0] if not v_info.empty else "未定"
                 
-                waypoints = [{"lat": depot_row["lat"], "lng": depot_row["lng"]}]
+                waypoints = [{"lat": float(depot_row["lat"]), "lng": float(depot_row["lng"])}]
                 
                 with cols[i]:
                     st.markdown(f"### <span style='color:{color}'>■</span> {v_name}", unsafe_allow_html=True)
@@ -414,7 +431,7 @@ with tab_result:
                             fill_color=color,
                             popup=f"{pt['name']} ({pt['care_level']})"
                         ).add_to(m_res)
-                    waypoints.append({"lat": depot_row["lat"], "lng": depot_row["lng"]})
+                    waypoints.append({"lat": float(depot_row["lat"]), "lng": float(depot_row["lng"])})
 
                     route_coords, dist, roads = get_route_geometry_and_steps(waypoints)
                     
