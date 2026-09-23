@@ -110,7 +110,7 @@ def update_route_data(optimized_rows, num_vehicles):
 st.title("送迎ルート最適化システム")
 st.markdown("日々の送迎計画の作成と、利用者・車両・道路データの管理を行います。")
 
-tab_plan, tab_users, tab_vehicles, tab_road, tab_result = st.tabs([
+tab_plan, tab_users, tab_vehicles, tab_result = st.tabs([
     "ダッシュボード＆計画作成", 
     "利用者管理", 
     "車両管理",  
