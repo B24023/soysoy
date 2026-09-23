@@ -50,14 +50,7 @@ if "vehicles_df" not in st.session_state:
             "driver": ["佐藤", "鈴木"]
         })
 
-# 3. 通行止めデータ（impassableタブ）
-if "impassable_df" not in st.session_state:
-    try:
-        df_i = conn.read(spreadsheet=SPREADSHEET_URL, worksheet="impassable").dropna(how="all")
-        st.session_state.impassable_df = df_i
-    except Exception as e:
-        st.warning(f"impassableシートの読み込みに失敗しました。空のデータで開始します。詳細: {e}")
-        st.session_state.impassable_df = pd.DataFrame(columns=["id", "road_name", "memo", "lat", "lng"])
+
 
 if "optimization_done" not in st.session_state:
     st.session_state.optimization_done = False
@@ -65,9 +58,7 @@ if "optimization_done" not in st.session_state:
 if "route_data" not in st.session_state:
     st.session_state.route_data = []
 
-# ──────────────────────────────────────────
-# ユーティリティ関数
-# ──────────────────────────────────────────
+
 def get_route_geometry_and_steps(waypoints):
     coords = ";".join([f"{p['lng']},{p['lat']}" for p in waypoints])
     url = f"http://router.project-osrm.org/route/v1/driving/{coords}?overview=full&geometries=geojson&steps=true"
@@ -122,8 +113,7 @@ st.markdown("日々の送迎計画の作成と、利用者・車両・道路デ�
 tab_plan, tab_users, tab_vehicles, tab_road, tab_result = st.tabs([
     "ダッシュボード＆計画作成", 
     "利用者管理", 
-    "車両管理", 
-    "通行止め管理", 
+    "車両管理",  
     "最適化結果"
 ])
 
@@ -162,12 +152,7 @@ with tab_plan:
         with col3:
             max_ride_time = st.number_input("最大乗車時間（分）", value=60)
             
-        st.write("**本日の「通れない道」適用**")
-        if not st.session_state.impassable_df.empty:
-            for _, road in st.session_state.impassable_df.iterrows():
-                st.checkbox(f"{road['road_name']} ({road['memo']})", value=True)
-        else:
-            st.caption("登録されている通れない道はありません。")
+
 
     if st.button("AIで最適ルートを自動作成する", type="primary", use_container_width=True):
         if edited_plan_df.empty or not edited_plan_df["出席"].any():
@@ -273,54 +258,7 @@ with tab_vehicles:
         except Exception as e:
             st.error(f"更新エラー: {e}")
 
-# ＝＝＝ タブ4: 通行止め管理 ＝＝＝
-with tab_road:
-    st.header("通れない道（工事・通行止め）登録")
-    st.markdown("※ 地図をクリックして緯度経度を取得できます。")
-    
-    m_road = folium.Map(location=[34.8151, 135.6525], zoom_start=13)
-    st_data = st_folium(m_road, height=300, width=800)
-    
-    with st.form("add_road_form"):
-        clicked_lat = st_data["last_clicked"]["lat"] if st_data and st_data.get("last_clicked") else ""
-        clicked_lng = st_data["last_clicked"]["lng"] if st_data and st_data.get("last_clicked") else ""
-        
-        st.write(f"選択した座標: {clicked_lat}, {clicked_lng}")
-        r_name = st.text_input("道路名・区間 *", placeholder="例：国道1号線 枚方バイパス")
-        r_memo = st.text_input("メモ", placeholder="例：終日車線規制")
-        
-        if st.form_submit_button("区間を登録する", type="primary"):
-            if r_name and clicked_lat:
-                new_id = len(st.session_state.impassable_df) + 1
-                new_road = pd.DataFrame([{
-                    "id": new_id, "road_name": r_name, "memo": r_memo, 
-                    "lat": clicked_lat, "lng": clicked_lng
-                }])
-                st.session_state.impassable_df = pd.concat([st.session_state.impassable_df, new_road], ignore_index=True)
-                
-                try:
-                    conn.update(spreadsheet=SPREADSHEET_URL, worksheet="impassable", data=st.session_state.impassable_df)
-                    st.success("登録し、スプレッドシート（impassable）を更新しました。")
-                except Exception as e:
-                    st.error(f"スプレッドシートの更新に失敗しました: {e}")
-            else:
-                st.error("エラー: 地図をクリックして座標を指定し、道路名を入力してください。")
-                
-    st.subheader("通れない道 一覧 (スプレッドシート: impassable)")
-    
-    edited_impassable_df = st.data_editor(
-        st.session_state.impassable_df,
-        num_rows="dynamic",
-        hide_index=True,
-        use_container_width=True
-    )
-    if st.button("通行止めデータを上書き保存する", key="save_roads"):
-        st.session_state.impassable_df = edited_impassable_df
-        try:
-            conn.update(spreadsheet=SPREADSHEET_URL, worksheet="impassable", data=st.session_state.impassable_df)
-            st.success("スプレッドシート（impassable）を更新しました。")
-        except Exception as e:
-            st.error(f"更新エラー: {e}")
+
 
 # ＝＝＝ タブ5: 最適化結果 ＝＝＝
 with tab_result:
