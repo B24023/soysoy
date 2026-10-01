@@ -1,0 +1,10 @@
+streamlit
+pandas
+folium
+streamlit-folium
+streamlit-sortables
+ortools
+requests
+shapely
+xlsxwriter
+openpyxl

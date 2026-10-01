@@ -1,0 +1,6 @@
+vehicle_id,name,type,capacity,wheelchair
+car1,ステラ,軽,4,0
+car2,デイズ,軽,4,0
+car3,タント,軽,4,0
+car4,ヴォクシー,ミニバン,6,1
+car5,ヴォクシー2,ミニバン,6,0

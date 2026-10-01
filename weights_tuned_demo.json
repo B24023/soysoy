@@ -1,0 +1,8 @@
+{
+  "w_travel": 1.0,
+  "w_balance": 100,
+  "w_ride": 3,
+  "w_window": 0,
+  "w_stability": 0,
+  "solver_time_limit_sec": 10
+}
